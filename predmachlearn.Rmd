@@ -1,0 +1,239 @@
+---
+title: "Identifying the way weight lifters lift weights from accelerometer data"
+author: "Gonzalo Gomez-Arrue Azpiazu"
+date: "Tuesday, May 19, 2015"
+output: html_document
+---
+
+## Background
+
+Collecting large amount of data about personal activity has become relatively inexpensive. People can now quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who performed barbell lifts in 5 specific different ways to train a model that will identify the way in which other barbell lifters are lifting barbells.
+
+Additional information is available from: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The dataset was collected during the preparation of this paper:
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf
+
+## Preparation
+
+Loading libraries:
+```{r}
+library(caret)
+```
+
+## Data processing
+
+### Obtaining the data
+
+Define the working directory name:
+```{r}
+dirname <- "predmachlearn"
+```
+
+If the current directory is not called `r dirname`, create it and set it as working directory:
+```{r}
+if (basename(getwd()) != dirname) {
+    dir.create(file.path(getwd(), dirname), showWarnings = FALSE)
+    setwd(file.path(getwd(), dirname))
+}
+```
+
+If the data file does not exist, download it (along with the additional documentation):
+```{r}
+if (!file.exists("pml-training.csv")) {
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                  destfile="pml-training.csv", method="curl")
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                  destfile="pml-testing.csv", method="curl")
+    download.file("http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf",
+                  destfile="2013.Velloso.QAR-WLE.pdf", method="curl")  
+}
+```
+
+### Exploring and cleaning the data
+
+Read the training data set:
+```{r cache=TRUE, results='hide'}
+training_set_orig<-read.csv("pml-training.csv")
+str(training_set_orig)
+```
+
+A quick overview of the dataset (avaiable in the Appendix) reveals there are three types of NA values in it: "NA", "#DIV/0!", and "".
+
+We re-read the training data set with the right NA types:
+```{r cache=TRUE, results='hide'}
+training_set_orig<-read.csv("pml-training.csv", na.strings = c("NA","#DIV/0!",""))
+summary(training_set_orig)
+```
+
+A second summary (also avaiable in the Appendix) reveals that some derived features are not populated in most entries in the dataset.
+
+According to the data specification (available at the web page of the original study), during the original study two types of additional features were calculated and added to the dataset, on top of the measurements from the devices themselves:
+- Additional aggregated features (total acceleration, roll, pitch and yaw; please note these can be calculated for each of the sensors at each given point in time)
+- Additional time window dependent features were calculated for time windows varying in length from 0.5s to 2.5s (maximum, minimum, average, variance, ...; please note all these only make sense when time *windows* are being considered). Since the dataset contains both entries that represent single points in time (for which these time window dependent features could not be calculated) and also time windows (for which they could be calculated), it is expected that only a small fraction of the entries will have this type of derived features
+
+The 19622 entries are classified thanks to the field 'new_window' as representing windows in 406 instances and single points in 19216 instances. It is therefore not a surprise to find that all the derived time window dependent features are unavailable in 19216 of the entries.
+
+We load and check the testing data set with the right NA types to see how it is constructed:
+```{r cache=TRUE, results='hide'}
+testing_set_orig<-read.csv("pml-testing.csv", na.strings = c("NA","#DIV/0!",""))
+summary(testing_set_orig)
+```
+
+Since all of our test subjects (summary available in the Appendix) represent also single points, all the derived time window dependent fields can be dropped.
+
+Please note in this context, 'test population' refers to those cases for which we do not have the classification. When we get to the point of training the models, 'test' will refer to the subset of the training population (i.e., one for which we know the classification) that will not be used in training but which we will use to estimate the potential classification error on a never seen before population (on top of using cross validation on the subset of the training data actually being used for training purposes).
+
+The fields to remove are those beginning with 'kurtosis', 'skewness', 'max', 'min', 'amplitude', 'var', 'avg', and 'stddev'. The fields to keep are those beginning with 'total', 'roll', 'pitch', 'yaw', plus the original measurements, which start with 'gyros', 'accel' and 'magnet'.
+
+```{r}
+training_set<-training_set_orig[,-grep("^kurtosis|^skewness|^max|^min|^amplitude|^var|^avg|^stddev",colnames(training_set_orig))]
+testing_set<-testing_set_orig[,-grep("^kurtosis|^skewness|^max|^min|^amplitude|^var|^avg|^stddev",colnames(testing_set_orig))]
+```
+
+Additionally, the first 7 fields are not related to prediction and can also be removed. Finally, the last field in the training set is the class that we are trying to predict (which should be kept), and that of the testing set is an id (which can be removed).
+
+```{r}
+training_set<-training_set[,8:ncol(training_set)]
+dim(training_set)
+testing_set<-testing_set[,8:(ncol(testing_set)-1)]
+dim(testing_set)
+```
+
+This leaves us with 52 usable features per entry: row, pitch, yaw, total acceleration, 3 components for the accelerometer, 3 for the gyroscope, and 3 for the magnet for each of the 4 measuring devices (belt, arm, forearm and barbell).
+
+We finally test all selected features to see is any of them can be removed due to it carrying too little information.
+
+```{r results='hide'}
+nzv<-nearZeroVar(training_set,saveMetrics=TRUE)
+nzv
+```
+
+The results can be found in the Appendix, but all of them look worth keeping.
+
+## Training the models
+
+First, and since the training dataset looks fairly large, we divide it into training and testing at a 60%/40% ratio.
+
+```{r results='hide'}
+set.seed(2015052001)
+train_id<-createDataPartition(training_set$classe,p=0.6,list=FALSE)
+train_data<-training_set[train_id,]
+test_data<-training_set[-train_id,]
+```
+
+Please note that given that the aggregated features are constructed in the direction of the movements we are attempting to classify (as can be seen in the web page of the original study), it is likely that that subset of aggregated features alone will generate a fairly strong model.
+
+The following two approaches will therefore be explored:
+- Train a random forest with 5-fold cross validation on the train data using all only the aggregated variables, then confirming the accuracy on the test data
+- Train a random forest with 5-fold cross validation on the train data using all of the variables, then confirming the accuracy on the test data
+
+Finally, both models will be used to predict the class of the cases for which we do not know the class.
+
+### All variables
+
+Training the model:
+```{r cache=TRUE}
+set.seed(2015052002)
+rf_all<-train(classe~.,data=train_data,method="rf",
+              trControl=trainControl(method="cv",number=5),allowParallel=TRUE)
+rf_all
+rf_all$finalModel
+```
+
+The expected error rate (estimated from the Out Of Bag error rate) is around 0.84%.
+
+Applying the model to the test data to confirm the error:
+```{r}
+rf_all_pred<-predict(rf_all,test_data)
+confusionMatrix(rf_all_pred,test_data$classe)
+```
+
+The error rate observed in the test data is (1-Accuracy) 1.03%.
+
+### Aggregated variables only
+
+Selecting the right fields:
+```{r}
+train_data_agg<-train_data[,-grep("^gyros|^accel|^magnet",colnames(train_data))]
+dim(train_data_agg)
+test_data_agg<-test_data[,-grep("^gyros|^accel|^magnet",colnames(test_data))]
+dim(test_data_agg)
+```
+
+This model will use only 16 of the 52 variables. Let's see how it performs.
+
+Training the model:
+```{r cache=TRUE}
+set.seed(2015052003)
+rf_agg<-train(classe~.,data=train_data_agg,method="rf",
+              trControl=trainControl(method="cv",number=5),allowParallel=TRUE)
+rf_agg
+rf_agg$finalModel
+```
+
+The expected error rate (estimated from the Out Of Bag error rate) is around 1.24%.
+
+Applying the model to the test data to confirm the error:
+```{r}
+rf_agg_pred<-predict(rf_agg,test_data_agg)
+confusionMatrix(rf_agg_pred,test_data_agg$classe)
+```
+
+The error rate observed in the test data, despite using fewer variables, is 1.62%.
+
+## Conclusions
+
+Applying the two models to the set retained for testing gave good results in both cases. As expected, the model with more variables has the potential to show a higher accuracy, and the 95% confidence intervals do not overlap, meaning the difference is significant.
+
+## Applying the model to the problem data
+
+And here they are:
+```{r}
+final_pred<-predict(rf_all,testing_set)
+final_pred
+final_pred_agg<-predict(rf_agg,testing_set)
+final_pred_agg
+```
+
+Both models give the same exact predictions; the extra complexity added by using all variables did not offer any additional insight in this test case.
+
+## Appendix
+
+Training set with misidentified NA values:
+```{r cache=TRUE}
+training_set_orig<-read.csv("pml-training.csv")
+str(training_set_orig)
+```
+
+Training set with properly identified NA values:
+```{r cache=TRUE}
+training_set_orig<-read.csv("pml-training.csv", na.strings = c("NA","#DIV/0!",""))
+summary(training_set_orig)
+```
+
+Equivalent summary of the testing set:
+```{r}
+testing_set_orig<-read.csv("pml-testing.csv", na.strings = c("NA","#DIV/0!",""))
+summary(testing_set_orig)
+```
+
+Results of the near zero variance test:
+```{r}
+nzv<-nearZeroVar(training_set,saveMetrics=TRUE)
+nzv
+```
+
+Printing the results:
+```{r}
+pml_write_files = function(x){
+     n = length(x)
+     for(i in 1:n){
+         filename = paste0("problem_id_",i,".txt")
+         write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+     }
+ }
+pml_write_files(final_pred)
+```
