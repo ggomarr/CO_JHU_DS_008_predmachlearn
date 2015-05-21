@@ -69,17 +69,15 @@ img {
 
 <div id="background" class="section level2">
 <h2>Background</h2>
-<p>Collecting large amount of data about personal activity has become relatively inexpensive. People can now quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who performed barbell lifts in 5 specific different ways to train a model that will identify the way in which other barbell lifters are lifting barbells.</p>
-<p>Additional information is available from: <a href="http://groupware.les.inf.puc-rio.br/har" class="uri">http://groupware.les.inf.puc-rio.br/har</a> (see the section on the Weight Lifting Exercise Dataset).</p>
+<p>Collecting large amount of data about personal activity has become relatively inexpensive. People can now quantify how much of a particular activity they do, but they rarely quantify how they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and barbell of 6 participants who performed barbell lifts in 5 specific different ways to train a model that will identify the way in which other barbell lifters are lifting barbells.</p>
 <p>The dataset was collected during the preparation of this paper:</p>
 <p>Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human ’13) . Stuttgart, Germany: ACM SIGCHI, 2013. <a href="http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf" class="uri">http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf</a></p>
+<p>Additional information is available from: <a href="http://groupware.les.inf.puc-rio.br/har" class="uri">http://groupware.les.inf.puc-rio.br/har</a> (see the section on the Weight Lifting Exercise Dataset).</p>
 </div>
 <div id="preparation" class="section level2">
 <h2>Preparation</h2>
 <p>Loading libraries:</p>
 <pre class="r"><code>library(caret)</code></pre>
-<pre><code>## Loading required package: lattice
-## Loading required package: ggplot2</code></pre>
 </div>
 <div id="data-processing" class="section level2">
 <h2>Data processing</h2>
@@ -108,17 +106,21 @@ img {
 <pre class="r"><code>training_set_orig&lt;-read.csv(&quot;pml-training.csv&quot;)
 str(training_set_orig)</code></pre>
 <p>A quick overview of the dataset (avaiable in the Appendix) reveals there are three types of NA values in it: “NA”, “#DIV/0!”, and “”.</p>
-<p>We re-read the training data set with the right NA types:</p>
+<p>We re-read the training data set with the right NA strings:</p>
 <pre class="r"><code>training_set_orig&lt;-read.csv(&quot;pml-training.csv&quot;, na.strings = c(&quot;NA&quot;,&quot;#DIV/0!&quot;,&quot;&quot;))
 summary(training_set_orig)</code></pre>
 <p>A second summary (also avaiable in the Appendix) reveals that some derived features are not populated in most entries in the dataset.</p>
-<p>According to the data specification (available at the web page of the original study), during the original study two types of additional features were calculated and added to the dataset, on top of the measurements from the devices themselves: - Additional aggregated features (total acceleration, roll, pitch and yaw; please note these can be calculated for each of the sensors at each given point in time) - Additional time window dependent features were calculated for time windows varying in length from 0.5s to 2.5s (maximum, minimum, average, variance, …; please note all these only make sense when time <em>windows</em> are being considered). Since the dataset contains both entries that represent single points in time (for which these time window dependent features could not be calculated) and also time windows (for which they could be calculated), it is expected that only a small fraction of the entries will have this type of derived features</p>
-<p>The 19622 entries are classified thanks to the field ‘new_window’ as representing windows in 406 instances and single points in 19216 instances. It is therefore not a surprise to find that all the derived time window dependent features are unavailable in 19216 of the entries.</p>
-<p>We load and check the testing data set with the right NA types to see how it is constructed:</p>
+<p>According to the data specification (available at the web page of the original study), during the experiment two types of additional features were calculated and added to the dataset (on top of the measurements from the devices themselves):</p>
+<ul>
+<li>Additional aggregated features (total acceleration, roll, pitch and yaw; please note these can be calculated for each of the sensors at each given point in time)</li>
+<li>Additional time window dependent features, calculated for time windows varying in length from 0.5s to 2.5s (maximum, minimum, average, variance, …; please note all these only make sense when time <em>windows</em> are being considered). Since the dataset contains both entries that represent single points in time (for which the time window dependent features could not be calculated) and also time windows (for which they could be calculated), it is expected that only a fraction of the entries will have this type of derived features</li>
+</ul>
+<p>The 19622 entries are classified as representing windows in 406 instances and single points in 19216 instances (through the field ‘new_window’). It is therefore not a surprise to find that all the derived time window dependent features are unavailable in (at least) 19216 of the entries.</p>
+<p>We now load and check the testing data set with the right NA strings to see how it is constructed:</p>
 <pre class="r"><code>testing_set_orig&lt;-read.csv(&quot;pml-testing.csv&quot;, na.strings = c(&quot;NA&quot;,&quot;#DIV/0!&quot;,&quot;&quot;))
 summary(testing_set_orig)</code></pre>
-<p>Since all of our test subjects (summary available in the Appendix) represent also single points, all the derived time window dependent fields can be dropped.</p>
 <p>Please note in this context, ‘test population’ refers to those cases for which we do not have the classification. When we get to the point of training the models, ‘test’ will refer to the subset of the training population (i.e., one for which we know the classification) that will not be used in training but which we will use to estimate the potential classification error on a never seen before population (on top of using cross validation on the subset of the training data actually being used for training purposes).</p>
+<p>The testng set matches the training set. Since all of our test subjects (summary available in the Appendix) represent also single points, all the derived time window dependent fields can be dropped from the analysis.</p>
 <p>The fields to remove are those beginning with ‘kurtosis’, ‘skewness’, ‘max’, ‘min’, ‘amplitude’, ‘var’, ‘avg’, and ‘stddev’. The fields to keep are those beginning with ‘total’, ‘roll’, ‘pitch’, ‘yaw’, plus the original measurements, which start with ‘gyros’, ‘accel’ and ‘magnet’.</p>
 <pre class="r"><code>training_set&lt;-training_set_orig[,-grep(&quot;^kurtosis|^skewness|^max|^min|^amplitude|^var|^avg|^stddev&quot;,colnames(training_set_orig))]
 testing_set&lt;-testing_set_orig[,-grep(&quot;^kurtosis|^skewness|^max|^min|^amplitude|^var|^avg|^stddev&quot;,colnames(testing_set_orig))]</code></pre>
@@ -130,7 +132,7 @@ dim(training_set)</code></pre>
 dim(testing_set)</code></pre>
 <pre><code>## [1] 20 52</code></pre>
 <p>This leaves us with 52 usable features per entry: row, pitch, yaw, total acceleration, 3 components for the accelerometer, 3 for the gyroscope, and 3 for the magnet for each of the 4 measuring devices (belt, arm, forearm and barbell).</p>
-<p>We finally test all selected features to see is any of them can be removed due to it carrying too little information.</p>
+<p>We finally test all selected features to see is any of them can be removed due to it carrying too little information:</p>
 <pre class="r"><code>nzv&lt;-nearZeroVar(training_set,saveMetrics=TRUE)
 nzv</code></pre>
 <p>The results can be found in the Appendix, but all of them look worth keeping.</p>
@@ -138,13 +140,17 @@ nzv</code></pre>
 </div>
 <div id="training-the-models" class="section level2">
 <h2>Training the models</h2>
-<p>First, and since the training dataset looks fairly large, we divide it into training and testing at a 60%/40% ratio.</p>
+<p>First, and since the training dataset looks fairly large, we divide it into training and testing at a 60/40 ratio.</p>
 <pre class="r"><code>set.seed(2015052001)
 train_id&lt;-createDataPartition(training_set$classe,p=0.6,list=FALSE)
 train_data&lt;-training_set[train_id,]
 test_data&lt;-training_set[-train_id,]</code></pre>
-<p>Please note that given that the aggregated features are constructed in the direction of the movements we are attempting to classify (as can be seen in the web page of the original study), it is likely that that subset of aggregated features alone will generate a fairly strong model.</p>
-<p>The following two approaches will therefore be explored: - Train a random forest with 5-fold cross validation on the train data using all only the aggregated variables, then confirming the accuracy on the test data - Train a random forest with 5-fold cross validation on the train data using all of the variables, then confirming the accuracy on the test data</p>
+<p>Given that the aggregated features are constructed in the direction of the movements we are attempting to classify (as can be seen in the web page of the original study), it is likely that that subset of aggregated features alone will generate a fairly strong model.</p>
+<p>The following two approaches will therefore be explored:</p>
+<ul>
+<li>Train a random forest with 5-fold cross validation on the train data using all of the variables, then confirming the accuracy on the test data</li>
+<li>Train a random forest with 5-fold cross validation on the train data using only the aggregated variables, then confirming the accuracy on the test data</li>
+</ul>
 <p>Finally, both models will be used to predict the class of the cases for which we do not know the class.</p>
 <div id="all-variables" class="section level3">
 <h3>All variables</h3>
@@ -191,11 +197,8 @@ rf_all</code></pre>
 ## E    0    0    2    7 2156 0.004157044</code></pre>
 <p>The expected error rate (estimated from the Out Of Bag error rate) is around 0.84%.</p>
 <p>Applying the model to the test data to confirm the error:</p>
-<pre class="r"><code>rf_all_pred&lt;-predict(rf_all,test_data)</code></pre>
-<pre><code>## Loading required package: randomForest
-## randomForest 4.6-10
-## Type rfNews() to see new features/changes/bug fixes.</code></pre>
-<pre class="r"><code>confusionMatrix(rf_all_pred,test_data$classe)</code></pre>
+<pre class="r"><code>rf_all_pred&lt;-predict(rf_all,test_data)
+confusionMatrix(rf_all_pred,test_data$classe)</code></pre>
 <pre><code>## Confusion Matrix and Statistics
 ## 
 ##           Reference
@@ -227,7 +230,7 @@ rf_all</code></pre>
 ## Detection Rate         0.2845   0.1905   0.1727   0.1592   0.1829
 ## Detection Prevalence   0.2863   0.1919   0.1789   0.1598   0.1830
 ## Balanced Accuracy      0.9988   0.9916   0.9915   0.9852   0.9975</code></pre>
-<p>The error rate observed in the test data is (1-Accuracy) 1.03%.</p>
+<p>The error rate observed in the test data is (1-Accuracy) 1.02%.</p>
 </div>
 <div id="aggregated-variables-only" class="section level3">
 <h3>Aggregated variables only</h3>
@@ -320,7 +323,9 @@ confusionMatrix(rf_agg_pred,test_data_agg$classe)</code></pre>
 </div>
 <div id="conclusions" class="section level2">
 <h2>Conclusions</h2>
-<p>Applying the two models to the set retained for testing gave good results in both cases. As expected, the model with more variables has the potential to show a higher accuracy, and the 95% confidence intervals do not overlap, meaning the difference is significant.</p>
+<p>Applying the two models to the set retained for testing gave quite good results in both cases.</p>
+<p>As expected, the model with more variables has the potential to show a higher accuracy, and the 95% confidence accuracy intervals do not overlap, meaning the difference is significant.</p>
+<p>The simpler model, however, takes much shorter time to train.</p>
 </div>
 <div id="applying-the-model-to-the-problem-data" class="section level2">
 <h2>Applying the model to the problem data</h2>
